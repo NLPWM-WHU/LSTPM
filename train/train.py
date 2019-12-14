@@ -222,7 +222,7 @@ def caculate_poi_distance(poi_coors):
                 distance_between = 1
             sim_matrix[poi_current][poi_target] = distance_between
             sim_matrix[poi_target][poi_current] = distance_between
-    pickle.dump(sim_matrix, open('distance.pk', 'wb'))
+    pickle.dump(sim_matrix, open('distance.pkl', 'wb'))
     return sim_matrix
 
 def generate_input_history(data_neural, mode, mode2=None, candidate=None):
