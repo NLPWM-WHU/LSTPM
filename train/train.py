@@ -67,7 +67,7 @@ class Model(nn.Module):
         self.user_dropout = nn.Dropout(user_dropout)
         self.data_neural = data_neural
         self.tim_sim_matrix = tim_sim_matrix
-        self.dilated_rnn = nn.LSTMCell(input_size=emb_size, hidden_size=hidden_units)
+        self.dilated_rnn = nn.LSTMCell(input_size=emb_size, hidden_size=hidden_units)# could be the same as self.lstmcell
         self.init_weights()
 
     def init_weights(self):
