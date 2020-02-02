@@ -86,21 +86,21 @@ class Model(nn.Module):
         sequence_size = item_vectors.size()[1]
         items = self.item_emb(item_vectors)
         item_vectors = item_vectors.cpu()
-        x = self.dropout(items)
+        x = items
         x = x.transpose(0, 1)
         h1 = Variable(torch.zeros(1, batch_size, self.hidden_units)).cuda()
         c1 = Variable(torch.zeros(1, batch_size, self.hidden_units)).cuda()
         out, (h1, c1) = self.lstmcell(x, (h1, c1))
         out = out.transpose(0, 1)#batch_size * sequence_length * embedding_dim
-        x1 = self.dropout(items)
+        x1 = items
         # ###########################################################
         user_batch = np.array(user_vectors.cpu())
         y_list = []
         out_hie = []
-        for sk in range(batch_size):
+        for ii in range(batch_size):
             ##########################################
-            current_session_input_dilated_rnn_index = sequence_dilated_rnn_index_batch[sk]
-            hiddens_current = x1[sk]
+            current_session_input_dilated_rnn_index = sequence_dilated_rnn_index_batch[ii]
+            hiddens_current = x1[ii]
             dilated_lstm_outs_h = []
             dilated_lstm_outs_c = []
             for index_dilated in range(len(current_session_input_dilated_rnn_index)):
@@ -119,22 +119,22 @@ class Model(nn.Module):
             dilated_lstm_outs_h.append(hiddens_current[len(current_session_input_dilated_rnn_index):])
             dilated_out = torch.cat(dilated_lstm_outs_h, dim = 0).unsqueeze(0)
             out_hie.append(dilated_out)
-            user_id_current = user_batch[sk]
-            current_session_timid = sequence_tim_batch[sk][:-1]
-            current_session_poiid = item_vectors[sk][:len(current_session_timid)]
-            session_id_current = session_id_batch[sk]
-            current_session_embed = out[sk]
-            current_session_mask = mask_batch_ix_non_local[sk].unsqueeze(1)
+            user_id_current = user_batch[ii]
+            current_session_timid = sequence_tim_batch[ii][:-1]
+            current_session_poiid = item_vectors[ii][:len(current_session_timid)]
+            session_id_current = session_id_batch[ii]
+            current_session_embed = out[ii]
+            current_session_mask = mask_batch_ix_non_local[ii].unsqueeze(1)
             sequence_length = int(sum(np.array(current_session_mask.cpu()))[0])
             current_session_represent_list = []
             if is_train:
-                for skk in range(sequence_length-1):
+                for iii in range(sequence_length-1):
                     current_session_represent = torch.sum(current_session_embed * current_session_mask, dim=0).unsqueeze(0)/sum(current_session_mask)
                     current_session_represent_list.append(current_session_represent)
             else:
-                for skk in range(sequence_length-1):
-                    current_session_represent_rep_item = current_session_embed[0:skk+1]
-                    current_session_represent_rep_item = torch.sum(current_session_represent_rep_item, dim = 0).unsqueeze(0)/(skk + 1)
+                for iii in range(sequence_length-1):
+                    current_session_represent_rep_item = current_session_embed[0:iii+1]
+                    current_session_represent_rep_item = torch.sum(current_session_represent_rep_item, dim = 0).unsqueeze(0)/(iii + 1)
                     current_session_represent_list.append(current_session_represent_rep_item)
 
             current_session_represent = torch.cat(current_session_represent_list, dim = 0)
@@ -142,13 +142,13 @@ class Model(nn.Module):
             list_for_avg_distance = []
             h2 = Variable(torch.zeros(1, 1, self.hidden_units)).cuda()###whole sequence
             c2 = Variable(torch.zeros(1, 1, self.hidden_units)).cuda()
-            for sk1 in range(session_id_current):
-                sequence = [s[0] for s in self.data_neural[user_id_current]['sessions'][sk1]]
+            for jj in range(session_id_current):
+                sequence = [s[0] for s in self.data_neural[user_id_current]['sessions'][jj]]
                 sequence = Variable(torch.LongTensor(np.array(sequence))).cuda()
                 sequence_emb = self.item_emb(sequence).unsqueeze(1)
                 sequence = sequence.cpu()
                 sequence_emb, (h2, c2) = self.lstmcell_history(sequence_emb, (h2, c2))
-                sequence_tim_id = [s[1] for s in self.data_neural[user_id_current]['sessions'][sk1]]
+                sequence_tim_id = [s[1] for s in self.data_neural[user_id_current]['sessions'][jj]]
                 jaccard_sim_row = Variable(torch.FloatTensor(self.tim_sim_matrix[current_session_timid]),requires_grad=False).cuda()
                 jaccard_sim_expicit = jaccard_sim_row[:,sequence_tim_id]
                 distance_row = poi_distance_matrix[current_session_poiid]
@@ -166,7 +166,8 @@ class Model(nn.Module):
             out_y_current = sims.bmm(sessions_represent).squeeze(1)
             ##############layer_2
             #layer_2_current = (lambda*out_y_current + (1-lambda)*current_session_embed[:sequence_length-1]).unsqueeze(2) #lambda from [0.1-0.9] better performance
-            layer_2_current = (out_y_current + current_session_embed[:sequence_length-1]).unsqueeze(2)##==>current_items * embedding_size * 1
+            # layer_2_current = (out_y_current + current_session_embed[:sequence_length-1]).unsqueeze(2)##==>current_items * embedding_size * 1
+            layer_2_current = (0.2 *out_y_current + 0.8 * current_session_embed[:sequence_length - 1]).unsqueeze(2)
             layer_2_sims =  F.softmax(sessions_represent.bmm(layer_2_current).squeeze(2) * 1.0/avg_distance, dim = 1).unsqueeze(1)##==>>current_items * 1 * history_session_length
             out_layer_2 = layer_2_sims.bmm(sessions_represent).squeeze(1)
             out_y_current_padd = Variable(torch.FloatTensor(sequence_size - sequence_length + 1, self.emb_size).zero_(),requires_grad=False).cuda()
@@ -180,7 +181,6 @@ class Model(nn.Module):
         out = F.selu(out)
         out = (out + out_hie) * 0.5
         out_put_emb_v1 = torch.cat([y, out], dim=2)
-        out_put_emb_v1 = self.dropout(out_put_emb_v1)
         output_ln = self.linear(out_put_emb_v1)
         output = F.log_softmax(output_ln, dim=-1)
         return output
@@ -210,9 +210,9 @@ def caculate_time_sim(data_neural):
     return sim_matrix
 
 def caculate_poi_distance(poi_coors):
+    print("distance matrix")
     sim_matrix = np.zeros((len(poi_coors) + 1, len(poi_coors) + 1))
     for i in range(len(poi_coors)):
-        print(i)
         for j in range(i , len(poi_coors)):
             poi_current = i + 1
             poi_target = j + 1
@@ -226,7 +226,7 @@ def caculate_poi_distance(poi_coors):
     pickle.dump(sim_matrix, open('distance.pkl', 'wb'))
     return sim_matrix
 
-def generate_input_history(data_neural, mode, mode2=None, candidate=None):
+def generate_input_history(data_neural, mode, candidate=None):
     data_train = {}
     train_idx = {}
     if candidate is None:
@@ -254,45 +254,10 @@ def generate_input_history(data_neural, mode, mode2=None, candidate=None):
             for j in range(c):
                 history.extend([(s[0], s[1]) for s in sessions[train_id[j]]])
             history = sorted(history, key=lambda x: x[1], reverse=False)
-            if mode2 == 'max':
-                history_tmp = {}
-                for tr in history:
-                    if tr[1] not in history_tmp:
-                        history_tmp[tr[1]] = [tr[0]]
-                    else:
-                        history_tmp[tr[1]].append(tr[0])
-                history_filter = []
-                for t in history_tmp:
-                    if len(history_tmp[t]) == 1:
-                        history_filter.append((history_tmp[t][0], t))
-                    else:
-                        tmp = Counter(history_tmp[t]).most_common()
-                        if tmp[0][1] > 1:
-                            history_filter.append((history_tmp[t][0], t))
-                        else:
-                            ti = np.random.randint(len(tmp))
-                            history_filter.append((tmp[ti][0], t))
-                history = history_filter
-                history = sorted(history, key=lambda x: x[1], reverse=False)
-            elif mode2 == 'avg':
-                history_tim = [t[1] for t in history]
-                history_count = [1]
-                last_t = history_tim[0]
-                count = 1
-                for t in history_tim[1:]:
-                    if t == last_t:
-                        count += 1
-                    else:
-                        history_count[-1] = count
-                        history_count.append(1)
-                        last_t = t
-                        count = 1
             history_loc = np.reshape(np.array([s[0] for s in history]), (len(history), 1))
             history_tim = np.reshape(np.array([s[1] for s in history]), (len(history), 1))
             trace['history_loc'] = Variable(torch.LongTensor(history_loc))
             trace['history_tim'] = Variable(torch.LongTensor(history_tim))
-            if mode2 == 'avg':
-                trace['history_count'] = history_count
             data_train[u][i] = trace
         train_idx[u] = train_id
     return data_train, train_idx
@@ -381,6 +346,7 @@ def create_dilated_rnn_input(session_sequence_current, poi_distance_matrix):
         distance_row_explicit = distance_row[:, poi_before][0]
         index_closet = np.argmin(distance_row_explicit)
         session_dilated_rnn_input_index[sequence_length - i - 1] = sequence_length-2-index_closet-i
+    session_sequence_current.reverse()
     return session_dilated_rnn_input_index
 
 
@@ -434,8 +400,8 @@ def train_network(network, num_epoch=40 ,batch_size = 32,criterion = None):
             if (i + 1) % 20 == 0:
                 print("epoch" + str(epoch) + ": loss: " + str(loss))
             i += 1
-        acc10 = evaluate(network, 10, 1)
-        print("ACC@ score: ", acc10)
+        results = evaluate(network, 1)
+        print("Scores: ", results)
 
 
 def get_acc(target, scores):
@@ -466,7 +432,7 @@ def get_acc(target, scores):
             break
     return acc.tolist(), ndcg.tolist()
 
-def evaluate(network, k, batch_size = 2):
+def evaluate(network, batch_size = 2):
     network.train(False)
     candidate = data_neural.keys()
     data_test, test_idx = generate_input_long_history(data_neural, 'test', candidate=candidate)
@@ -535,8 +501,8 @@ if __name__ == '__main__':
     loc_size = len(vid_list)
     uid_size = len(uid_list)
     time_sim_matrix = caculate_time_sim(data_neural)
-    poi_distance_matrix = caculate_poi_distance(poi_coordinate)
-    #poi_distance_matrix = pickle.load(open('distance.pkl', 'rb'), encoding='iso-8859-1')
+    # poi_distance_matrix = caculate_poi_distance(poi_coordinate)
+    poi_distance_matrix = pickle.load(open('distance.pkl', 'rb'), encoding='iso-8859-1')
     torch.cuda.empty_cache()
     gc.collect()
     device = torch.device("cuda")
